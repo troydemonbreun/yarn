@@ -25,17 +25,71 @@ export async function run(
     throw new MessageError(reporter.lang('tooFewArguments', 1));
   }
 
-  const totalSteps = args.length + 1;
-  let step = 0;
-
   // load manifests
   const lockfile = await Lockfile.fromDirectory(config.cwd);
   const install = new Install(flags, config, new NoopReporter(), lockfile);
   const rootManifests = await install.getRootManifests();
-  const manifests = [];
+  let manifests = [];
+  let modules: Array<string> = [];
 
-  for (const name of args) {
-    reporter.step(++step, totalSteps, `Removing module ${name}`);
+  if (args.length === 1 && args[0] == '*') {
+
+    //get list of dependencies
+
+    for (const registryName of Object.keys(registries)) {
+      const object = rootManifests[registryName].object;
+
+      for (const type of constants.DEPENDENCY_TYPES) {
+        const deps = object[type];	
+
+        if (deps && Object.keys(deps).length) {
+          modules = modules.concat(Object.keys(deps));
+          console.log(modules);
+        }
+      }
+    
+    }
+  } else {
+    modules = args;
+  }
+
+  if (!modules.length) {
+    throw new MessageError(reporter.lang('moduleNotInManifest'));
+  }
+
+  manifests = await removeModules(config, reporter, rootManifests, modules);
+
+  // save manifests
+  await install.saveRootManifests(rootManifests);
+
+  // run hooks - npm runs these one after another
+  for (const action of ['preuninstall', 'uninstall', 'postuninstall']) {
+    for (const [loc, manifest] of manifests) {
+      await execFromManifest(config, action, manifest, loc);
+    }
+  }
+
+  // reinstall so we can get the updated lockfile
+  reporter.step(modules.length + 1, modules.length + 1, reporter.lang('uninstallRegenerate'));
+  const reinstall = new Install({force: true, ...flags}, config, new NoopReporter(), lockfile);
+  await reinstall.init();
+
+  //
+  reporter.success(reporter.lang('uninstalledPackages'));
+}
+
+async function removeModules(
+  config: Config,
+  reporter: Reporter,
+  rootManifests: any,
+  moduleNames: Array<string>,
+): Promise<Array<any>> {
+
+  const manifests = [];
+  let step = 0;
+
+  for (const name of moduleNames) {
+    reporter.step(++step, moduleNames.length + 1, `Removing module ${name}`);
 
     let found = false;
 
@@ -65,21 +119,5 @@ export async function run(
     }
   }
 
-  // save manifests
-  await install.saveRootManifests(rootManifests);
-
-  // run hooks - npm runs these one after another
-  for (const action of ['preuninstall', 'uninstall', 'postuninstall']) {
-    for (const [loc, manifest] of manifests) {
-      await execFromManifest(config, action, manifest, loc);
-    }
-  }
-
-  // reinstall so we can get the updated lockfile
-  reporter.step(++step, totalSteps, reporter.lang('uninstallRegenerate'));
-  const reinstall = new Install({force: true, ...flags}, config, new NoopReporter(), lockfile);
-  await reinstall.init();
-
-  //
-  reporter.success(reporter.lang('uninstalledPackages'));
+  return manifests;
 }
