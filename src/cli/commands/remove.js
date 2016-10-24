@@ -33,9 +33,7 @@ export async function run(
   let modules: Array<string> = [];
 
   if (args.length === 1 && args[0] == '*') {
-
-    //get list of dependencies
-
+    //enumerate list of dependencies
     for (const registryName of Object.keys(registries)) {
       const object = rootManifests[registryName].object;
 
@@ -47,7 +45,6 @@ export async function run(
           console.log(modules);
         }
       }
-    
     }
   } else {
     modules = args;
